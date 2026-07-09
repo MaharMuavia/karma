@@ -1,0 +1,19 @@
+[project]
+name = "karma-registry"
+version = "1.0.0"
+description = "Karma — a reputation registry web service for AI agents."
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.34.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.27",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
