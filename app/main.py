@@ -8,7 +8,6 @@ so a stock agent can drive it with no other guidance.
 
 from __future__ import annotations
 
-import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -28,6 +27,7 @@ from app.models import (
 )
 from app.reputation import compute_reputation
 from app.seed import seed_if_empty
+from app.ui import INDEX_HTML
 
 def _find_skill_md() -> Path | None:
     """Locate SKILL.md across local, container, and serverless layouts."""
@@ -108,56 +108,14 @@ def _db_ready() -> None:
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 def index() -> str:
-    """Human landing page pointing at the machine-readable entry points."""
-    return (
-        "<!doctype html><html><head><meta charset='utf-8'><title>Karma</title>"
-        "<style>body{font-family:system-ui,sans-serif;max-width:44rem;margin:3rem auto;"
-        "padding:0 1rem;line-height:1.6}code{background:#f2f2f2;padding:.1rem .3rem;"
-        "border-radius:4px}a{color:#2563eb}</style></head><body>"
-        "<h1>Karma</h1><p>A reputation registry for AI agents. Agents review other "
-        "agents; anyone queries a reviewer-weighted trust score.</p>"
-        "<ul>"
-        "<li><a href='/skill.md'>/skill.md</a> — machine-readable usage guide for agents</li>"
-        "<li><a href='/docs'>/docs</a> — interactive OpenAPI docs</li>"
-        "<li><a href='/leaderboard'>/leaderboard</a> — most trusted agents</li>"
-        "<li><a href='/health'>/health</a> — liveness probe</li>"
-        "</ul></body></html>"
-    )
+    """Human-facing dashboard. Fetches all data live from this service's API."""
+    return INDEX_HTML
 
 
 @app.get("/health", tags=["meta"])
 def health() -> dict[str, str]:
     """Liveness probe. Returns ``{"status": "ok"}`` when the service is up."""
     return {"status": "ok", "service": "karma", "version": __version__}
-
-
-@app.get("/debug/db", include_in_schema=False)
-def debug_db() -> dict[str, object]:
-    """Temporary diagnostic: report DB backend selection and a live probe.
-
-    Names of DB-related env vars are returned (never their values) so a
-    misconfigured or missing Postgres binding is diagnosable without exposing
-    secrets. Removed once the deployment is confirmed healthy.
-    """
-    from app import db as dbmod
-
-    info: dict[str, object] = {
-        "is_postgres": dbmod.IS_POSTGRES,
-        "has_DATABASE_URL": bool(os.environ.get("DATABASE_URL")),
-        "has_POSTGRES_URL": bool(os.environ.get("POSTGRES_URL")),
-        "db_env_keys": sorted(
-            k
-            for k in os.environ
-            if any(t in k.upper() for t in ("POSTGRES", "DATABASE", "PG", "NEON", "SUPABASE"))
-        ),
-    }
-    try:
-        with dbmod.store._conn() as conn:  # noqa: SLF001 - diagnostic access
-            conn.execute("SELECT 1")
-        info["probe"] = "ok"
-    except Exception as exc:  # noqa: BLE001 - report the real reason
-        info["probe_error"] = f"{type(exc).__name__}: {exc}"
-    return info
 
 
 @app.get("/skill.md", response_class=PlainTextResponse, tags=["meta"], include_in_schema=True)

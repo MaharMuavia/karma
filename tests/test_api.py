@@ -149,3 +149,14 @@ def test_weighting_beats_naive_average(client: TestClient) -> None:
     rep = client.get(f"/agents/{subject}/reputation").json()
     # Weighted score stays high; the naive average would be dragged lower.
     assert rep["score"] > rep["raw_average"]
+
+
+def test_dashboard_served_at_root(client: TestClient) -> None:
+    # The human dashboard is served at / and is self-contained HTML that
+    # drives the same public API from the browser.
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers["content-type"]
+    body = resp.text
+    assert "KARMA" in body
+    assert "/agents/" in body  # the page calls the reputation API
