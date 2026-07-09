@@ -16,7 +16,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from app import __version__
-from app.db import get_conn, init_db, upsert_agent
+from app.db import store
 from app.models import (
     Leaderboard,
     LeaderboardEntry,
@@ -28,14 +28,42 @@ from app.models import (
 from app.reputation import compute_reputation
 from app.seed import seed_if_empty
 
-_SKILL_PATH = Path(__file__).resolve().parent.parent / "SKILL.md"
+def _find_skill_md() -> Path | None:
+    """Locate SKILL.md across local, container, and serverless layouts."""
+    here = Path(__file__).resolve()
+    candidates = [
+        here.parent.parent / "SKILL.md",  # repo root (local, Render)
+        Path.cwd() / "SKILL.md",  # working dir (Vercel /var/task)
+        here.parent / "SKILL.md",  # bundled next to the package
+    ]
+    for path in candidates:
+        if path.is_file():
+            return path
+    return None
+
+
+_ready = False
+
+
+def ensure_ready() -> None:
+    """Idempotently create the schema and seed demo data exactly once per process.
+
+    Run at import time (not only in ``lifespan``) because serverless hosts such
+    as Vercel do not reliably fire ASGI lifespan events, so relying on lifespan
+    alone would leave the tables uncreated on the first request.
+    """
+    global _ready
+    if _ready:
+        return
+    store.init_schema()
+    seed_if_empty()
+    _ready = True
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """Create the schema and seed demo data before the service accepts traffic."""
-    init_db()
-    seed_if_empty()
+    """Ensure the store is ready before a long-lived host accepts traffic."""
+    ensure_ready()
     yield
 
 
@@ -49,6 +77,13 @@ app = FastAPI(
     ),
     lifespan=lifespan,
 )
+
+
+@app.middleware("http")
+async def _ready_guard(request: Request, call_next):  # type: ignore[no-untyped-def]
+    """Guarantee the schema exists before handling any request (serverless-safe)."""
+    ensure_ready()
+    return await call_next(request)
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
@@ -85,33 +120,25 @@ def skill_md(request: Request) -> str:
     the one currently answering requests.
     """
     base_url = str(request.base_url).rstrip("/")
-    try:
-        text = _SKILL_PATH.read_text(encoding="utf-8")
-    except FileNotFoundError:  # pragma: no cover - only if packaging is broken
+    path = _find_skill_md()
+    if path is None:  # pragma: no cover - only if packaging is broken
         raise HTTPException(status_code=500, detail="SKILL.md not found on server")
-    return text.replace("__BASE_URL__", base_url)
+    return path.read_text(encoding="utf-8").replace("__BASE_URL__", base_url)
 
 
 @app.post("/reviews", response_model=ReviewAccepted, status_code=201, tags=["reviews"])
 def create_review(review: ReviewIn) -> ReviewAccepted:
     """Store one review of ``subject_id`` by ``reviewer_id`` and return its id."""
-    with get_conn() as conn:
-        upsert_agent(conn, review.reviewer_id, review.reviewer_display_name)
-        upsert_agent(conn, review.subject_id, review.subject_display_name)
-        cur = conn.execute(
-            "INSERT INTO reviews "
-            "(reviewer_id, subject_id, rating, outcome, task_summary, evidence_url) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (
-                review.reviewer_id,
-                review.subject_id,
-                review.rating,
-                review.outcome,
-                review.task_summary,
-                review.evidence_url,
-            ),
-        )
-        review_id = int(cur.lastrowid or 0)
+    review_id = store.add_review(
+        reviewer_id=review.reviewer_id,
+        subject_id=review.subject_id,
+        rating=review.rating,
+        outcome=review.outcome,
+        task_summary=review.task_summary,
+        evidence_url=review.evidence_url,
+        reviewer_display_name=review.reviewer_display_name,
+        subject_display_name=review.subject_display_name,
+    )
     return ReviewAccepted(
         review_id=review_id,
         subject_id=review.subject_id,
@@ -126,8 +153,7 @@ def create_review(review: ReviewIn) -> ReviewAccepted:
 )
 def get_reputation(agent_id: str) -> Reputation:
     """Return the reviewer-weighted trust summary for ``agent_id`` (404 if unknown)."""
-    with get_conn() as conn:
-        result = compute_reputation(conn, agent_id)
+    result = compute_reputation(store, agent_id)
     if result is None:
         raise HTTPException(status_code=404, detail=f"unknown agent: {agent_id}")
     return Reputation(**result)  # type: ignore[arg-type]
@@ -144,37 +170,27 @@ def list_reviews(
     offset: int = Query(0, ge=0),
 ) -> list[ReviewOut]:
     """List reviews received by ``agent_id``, newest first, paginated."""
-    with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT id, reviewer_id, subject_id, rating, outcome, task_summary, "
-            "evidence_url, created_at FROM reviews WHERE subject_id = ? "
-            "ORDER BY id DESC LIMIT ? OFFSET ?",
-            (agent_id, limit, offset),
-        ).fetchall()
-    return [ReviewOut(**dict(row)) for row in rows]
+    rows = store.reviews_detail(agent_id, limit, offset)
+    return [ReviewOut(**row) for row in rows]
 
 
 @app.get("/leaderboard", response_model=Leaderboard, tags=["reputation"])
 def leaderboard(limit: int = Query(20, ge=1, le=100)) -> Leaderboard:
     """Return the most trusted agents, ranked by weighted score then confidence."""
-    with get_conn() as conn:
-        subjects = conn.execute(
-            "SELECT DISTINCT subject_id FROM reviews"
-        ).fetchall()
-        entries: list[LeaderboardEntry] = []
-        for row in subjects:
-            rep = compute_reputation(conn, row["subject_id"])
-            if rep is None:
-                continue
-            entries.append(
-                LeaderboardEntry(
-                    agent_id=str(rep["agent_id"]),
-                    display_name=rep["display_name"],  # type: ignore[arg-type]
-                    score=float(rep["score"]),  # type: ignore[arg-type]
-                    confidence=float(rep["confidence"]),  # type: ignore[arg-type]
-                    review_count=int(rep["review_count"]),  # type: ignore[arg-type]
-                )
+    entries: list[LeaderboardEntry] = []
+    for subject_id in store.distinct_subjects():
+        rep = compute_reputation(store, subject_id)
+        if rep is None:
+            continue
+        entries.append(
+            LeaderboardEntry(
+                agent_id=str(rep["agent_id"]),
+                display_name=rep["display_name"],  # type: ignore[arg-type]
+                score=float(rep["score"]),  # type: ignore[arg-type]
+                confidence=float(rep["confidence"]),  # type: ignore[arg-type]
+                review_count=int(rep["review_count"]),  # type: ignore[arg-type]
             )
+        )
     entries.sort(key=lambda e: (e.score, e.confidence, e.review_count), reverse=True)
     return Leaderboard(count=len(entries[:limit]), agents=entries[:limit])
 
@@ -184,3 +200,12 @@ async def not_found_handler(request: Request, exc: HTTPException) -> JSONRespons
     """Return a helpful JSON body for unmatched routes and unknown agents."""
     detail = exc.detail if isinstance(exc, HTTPException) else "not found"
     return JSONResponse(status_code=404, content={"error": detail, "see": "/skill.md"})
+
+
+# Initialize at import so serverless cold starts have a ready schema even if the
+# ASGI lifespan never fires. Best-effort: a transient DB error here is retried by
+# the per-request ready-guard middleware.
+try:
+    ensure_ready()
+except Exception:  # noqa: BLE001 - startup DB hiccup is retried per-request
+    pass

@@ -48,23 +48,41 @@ uv pip install -r requirements.txt pytest httpx
 uv run pytest -q          # 10 tests
 ```
 
-## Deploy (Render free tier)
+## Storage
 
-This repo ships a [`render.yaml`](./render.yaml) blueprint.
+The service auto-selects its backend from the environment:
 
-1. Push this repo to GitHub.
-2. In the [Render dashboard](https://dashboard.render.com/): **New +** → **Blueprint**
-   → connect this repo → **Apply**. Render reads `render.yaml`, builds, and
-   deploys a free web service with a public `https://…onrender.com` URL.
-3. Health check path is `/health`. Free instances sleep when idle; the first
-   request after a quiet period takes 30-60 seconds.
+- **`DATABASE_URL` / `POSTGRES_URL` set** → Postgres (via `psycopg`). Use this in
+  production and on serverless hosts, which have no persistent local disk.
+- **neither set** → a local SQLite file (`karma.db`). Zero-config for local dev
+  and the test suite.
 
-Start command (if configuring manually): `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+## Deploy on Vercel (free)
+
+Vercel is serverless, so it needs Postgres (a local SQLite file would not persist
+between requests). This repo ships [`vercel.json`](./vercel.json) and
+[`api/index.py`](./api/index.py).
+
+1. Push this repo to GitHub (already done).
+2. In [Vercel](https://vercel.com/new): **Add New… → Project**, import the
+   `karma` repo, and **Deploy** (framework preset: *Other*; `vercel.json` handles
+   routing).
+3. Add a database: project **Storage** tab → **Create Database** → **Postgres** →
+   connect it to the project. Vercel injects `POSTGRES_URL` automatically.
+4. **Redeploy** so the app picks up `POSTGRES_URL`. On boot it creates the schema
+   and seeds demo data.
+5. Your public URL is `https://<project>.vercel.app`. Verify `GET /health` and
+   `GET /skill.md`.
+
+## Deploy on Render (alternative, uses SQLite as-is)
+
+This repo also ships a [`render.yaml`](./render.yaml) blueprint: **New + →
+Blueprint →** connect the repo **→ Apply**. Render runs the current SQLite code
+with no database to provision; health check path is `/health`. Free instances
+sleep when idle (first request after idle takes 30-60s) and the ephemeral disk
+resets on cold start, so the demo seed re-populates each time.
 
 ## Notes
 
 - No auth: the registry is intentionally permissionless for the hackathon.
   Rate-limiting and cryptographic signing of reviews are future work.
-- On free tiers the SQLite file is ephemeral and resets on cold start; the demo
-  seed guarantees the service is never empty. For durable storage, mount a
-  persistent disk and set `KARMA_DB_PATH` to a path on it.

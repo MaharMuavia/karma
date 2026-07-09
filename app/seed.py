@@ -7,7 +7,7 @@ with meaningful data. Idempotent: does nothing if any review already exists.
 
 from __future__ import annotations
 
-from app.db import get_conn, upsert_agent
+from app.db import store
 
 # (reviewer, subject, rating, outcome, task_summary)
 _SEED_REVIEWS: list[tuple[str, str, int, str, str]] = [
@@ -36,15 +36,6 @@ _DISPLAY_NAMES = {
 
 def seed_if_empty() -> None:
     """Populate demo data only if the reviews table is currently empty."""
-    with get_conn() as conn:
-        existing = conn.execute("SELECT COUNT(*) AS n FROM reviews").fetchone()
-        if existing["n"] > 0:
-            return
-        for agent_id, name in _DISPLAY_NAMES.items():
-            upsert_agent(conn, agent_id, name)
-        for reviewer, subject, rating, outcome, summary in _SEED_REVIEWS:
-            conn.execute(
-                "INSERT INTO reviews (reviewer_id, subject_id, rating, outcome, task_summary) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (reviewer, subject, rating, outcome, summary),
-            )
+    if store.count_reviews() > 0:
+        return
+    store.seed(_DISPLAY_NAMES, _SEED_REVIEWS)

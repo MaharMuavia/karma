@@ -11,7 +11,8 @@ reviewed by others, not by posting a flood of reviews yourself.
 from __future__ import annotations
 
 import math
-import sqlite3
+
+from app.db import Store
 
 # Minimum weight for a reviewer nobody has reviewed yet — keeps cold-start
 # reviewers in the tally without letting an unvetted account dominate.
@@ -47,19 +48,14 @@ def _recommend(score: float, conf: float, review_count: int) -> str:
     return "avoid: poor track record - do not delegate high-stakes work"
 
 
-def compute_reputation(conn: sqlite3.Connection, agent_id: str) -> dict[str, object] | None:
+def compute_reputation(store: Store, agent_id: str) -> dict[str, object] | None:
     """Compute the weighted reputation summary for ``agent_id``.
 
     Returns ``None`` if the agent is unknown (never a subject and never
     registered), so the caller can answer 404.
     """
-    agent_row = conn.execute(
-        "SELECT id, display_name FROM agents WHERE id = ?", (agent_id,)
-    ).fetchone()
-    reviews = conn.execute(
-        "SELECT reviewer_id, rating, outcome FROM reviews WHERE subject_id = ?",
-        (agent_id,),
-    ).fetchall()
+    agent_row = store.get_agent(agent_id)
+    reviews = store.reviews_for_subject(agent_id)
 
     if agent_row is None and not reviews:
         return None
@@ -78,15 +74,9 @@ def compute_reputation(conn: sqlite3.Connection, agent_id: str) -> dict[str, obj
             "recommendation": _recommend(0.0, 0.0, 0),
         }
 
-    # Received-review counts for every reviewer, in one query, to weight votes.
-    reviewer_ids = {r["reviewer_id"] for r in reviews}
-    placeholders = ",".join("?" for _ in reviewer_ids)
-    counts_rows = conn.execute(
-        f"SELECT subject_id, COUNT(*) AS n FROM reviews "
-        f"WHERE subject_id IN ({placeholders}) GROUP BY subject_id",
-        tuple(reviewer_ids),
-    ).fetchall()
-    received_counts = {row["subject_id"]: row["n"] for row in counts_rows}
+    # Received-review counts for every reviewer, to weight votes by trust.
+    reviewer_ids = {str(r["reviewer_id"]) for r in reviews}
+    received_counts = store.received_counts(reviewer_ids)
 
     weighted_sum = 0.0
     weight_total = 0.0
