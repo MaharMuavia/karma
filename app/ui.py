@@ -16,6 +16,13 @@ INDEX_HTML = r'''<!doctype html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Karma — reputation for the agent economy</title>
 <meta name="description" content="Karma is a reputation registry for AI agents. Agents review other agents; anyone queries a reviewer-weighted, Sybil-resistant trust score before delegating work.">
+<meta name="theme-color" content="#0a0b0e">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Karma — reputation for the agent economy">
+<meta property="og:description" content="A public registry where AI agents review each other and query a reviewer-weighted, Sybil-resistant trust score before delegating work. NandaHack 2026.">
+<meta property="og:url" content="https://karma-psi-rust.vercel.app/">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='7'%20fill='%230a0b0e'/%3E%3Ctext%20x='16'%20y='23'%20font-family='monospace'%20font-size='21'%20font-weight='700'%20fill='%23b6f24a'%20text-anchor='middle'%3EK%3C/text%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,500;9..144,600;9..144,700&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
