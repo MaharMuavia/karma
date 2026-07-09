@@ -15,7 +15,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 
 from app import __version__
@@ -234,6 +234,68 @@ def get_reputation(agent_id: str) -> Reputation:
     if result is None:
         raise HTTPException(status_code=404, detail=f"unknown agent: {agent_id}")
     return Reputation(**result)  # type: ignore[arg-type]
+
+
+_BADGE_COLORS = {
+    "trusted": "#1f8a4c",
+    "mixed": "#c9820a",
+    "avoid": "#d5453f",
+    "provisional": "#c9820a",
+    "unrated": "#8a877d",
+}
+
+
+def _badge_status(rep: dict[str, object] | None) -> tuple[str, str]:
+    """Map a reputation summary to the badge's right-hand text and color key."""
+    if rep is None or int(rep["review_count"]) == 0:  # type: ignore[arg-type]
+        return "unrated", "unrated"
+    rec = str(rep["recommendation"])
+    score = float(rep["score"])  # type: ignore[arg-type]
+    if rec.startswith("trusted:"):
+        return f"{score:.2f}/5 · trusted", "trusted"
+    if rec.startswith("avoid:"):
+        return f"{score:.2f}/5 · avoid", "avoid"
+    if rec.startswith("low confidence:"):
+        return f"{score:.2f}/5 · provisional", "provisional"
+    return f"{score:.2f}/5 · mixed", "mixed"
+
+
+@app.get("/agents/{agent_id}/badge.svg", tags=["reputation"])
+def badge(agent_id: str) -> Response:
+    """Live embeddable trust badge (SVG), shields.io-style.
+
+    Always returns 200 so embeds never break: unknown or unreviewed agents get
+    a gray "unrated" badge. Embed it anywhere an agent advertises itself::
+
+        <img src="{base}/agents/summarizer-pro/badge.svg">
+    """
+    _db_ready()
+    status, color_key = _badge_status(compute_reputation(store, agent_id))
+    color = _BADGE_COLORS[color_key]
+    label = "karma"
+    char_w = 6.6  # approx Verdana 11px character width
+    pad = 10.0
+    label_w = round(len(label) * char_w + pad * 2)
+    status_w = round(len(status) * char_w + pad * 2)
+    total_w = label_w + status_w
+    svg = f"""<svg xmlns="http://www.w3.org/2000/svg" width="{total_w}" height="20" role="img" aria-label="{label}: {status}">
+  <linearGradient id="s" x2="0" y2="100%"><stop offset="0" stop-color="#fff" stop-opacity=".1"/><stop offset="1" stop-opacity=".1"/></linearGradient>
+  <clipPath id="r"><rect width="{total_w}" height="20" rx="3" fill="#fff"/></clipPath>
+  <g clip-path="url(#r)">
+    <rect width="{label_w}" height="20" fill="#2f3441"/>
+    <rect x="{label_w}" width="{status_w}" height="20" fill="{color}"/>
+    <rect width="{total_w}" height="20" fill="url(#s)"/>
+  </g>
+  <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="11">
+    <text x="{label_w / 2}" y="14">{label}</text>
+    <text x="{label_w + status_w / 2}" y="14">{status}</text>
+  </g>
+</svg>"""
+    return Response(
+        content=svg,
+        media_type="image/svg+xml",
+        headers={"Cache-Control": "no-cache, max-age=60"},
+    )
 
 
 @app.get(

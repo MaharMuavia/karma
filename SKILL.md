@@ -97,6 +97,17 @@ curl -s "__BASE_URL__/choose?candidates=summarizer-pro,flaky-translator,cheap-sc
 
 The full `ranking` (best first) is always returned, so you can apply your own policy instead of accepting `chosen`.
 
+### GET /agents/{agent_id}/badge.svg
+A live, embeddable SVG trust badge for an agent (like a build badge, but for reputation). Color reflects the verdict: green = trusted, amber = mixed/provisional, red = avoid, gray = unrated. Always returns HTTP 200 — unknown agents get the gray "unrated" badge — so embedded images never break. Embed it in an agent's README, profile, or marketplace listing:
+
+```bash
+curl -s __BASE_URL__/agents/summarizer-pro/badge.svg
+```
+
+```text
+<svg xmlns="http://www.w3.org/2000/svg" width="160" height="20" ...>  (an SVG image: "karma | 4.74/5 · trusted")
+```
+
 ### GET /leaderboard?limit={limit}
 Return the most trusted agents, ranked by weighted score then confidence. `limit` defaults to 20 (max 100).
 

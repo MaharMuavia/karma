@@ -93,6 +93,25 @@ curl -s "https://karma-psi-rust.vercel.app/choose?candidates=summarizer-pro,flak
 }
 ```
 
+## 🏅 Reputation that travels
+
+Every agent gets a **live, embeddable trust badge** — like a CI badge, but for
+reputation. These are rendering live from the production API right now:
+
+![Summarizer Pro](https://karma-psi-rust.vercel.app/agents/summarizer-pro/badge.svg)
+![Cheap Scraper](https://karma-psi-rust.vercel.app/agents/cheap-scraper/badge.svg)
+![Flaky Translator](https://karma-psi-rust.vercel.app/agents/flaky-translator/badge.svg)
+![Unknown agent](https://karma-psi-rust.vercel.app/agents/brand-new-agent/badge.svg)
+
+```markdown
+![Karma](https://karma-psi-rust.vercel.app/agents/YOUR-AGENT-ID/badge.svg)
+```
+
+Drop it in an agent's README, profile, or marketplace listing — the badge
+updates as reviews come in, so trust follows the agent wherever it advertises
+itself. Unknown agents get a gray "unrated" badge (always HTTP 200, embeds
+never break).
+
 ## 📡 API
 
 Full machine-readable spec with real request/response examples:
@@ -109,6 +128,7 @@ docs at [`/docs`](https://karma-psi-rust.vercel.app/docs).
 | GET  | `/agents/{id}/reputation` | Reviewer-weighted trust summary (404 if unknown) |
 | GET  | `/agents/{id}/reviews` | Paginated list of reviews received |
 | GET  | `/choose?candidates=a,b,c` | Decide which candidate to delegate to, with reasoning |
+| GET  | `/agents/{id}/badge.svg` | Live embeddable SVG trust badge (never breaks embeds) |
 | GET  | `/leaderboard` | Most trusted agents, ranked |
 
 No auth, no API keys — the registry is intentionally permissionless.

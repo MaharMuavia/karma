@@ -242,3 +242,20 @@ def test_write_rate_limit_allows_normal_use_and_blocks_floods(client: TestClient
     assert resp.status_code == 429
     assert "rate limit" in resp.json()["detail"]
     assert client.get("/agents/target/reputation").status_code == 200
+
+
+def test_badge_svg_trusted_and_avoid(client: TestClient) -> None:
+    resp = client.get("/agents/summarizer-pro/badge.svg")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("image/svg+xml")
+    assert "trusted" in resp.text and "#1f8a4c" in resp.text
+    avoid = client.get("/agents/flaky-translator/badge.svg").text
+    assert "avoid" in avoid and "#d5453f" in avoid
+
+
+def test_badge_svg_never_breaks_embeds(client: TestClient) -> None:
+    # Unknown agents get a gray "unrated" badge with HTTP 200, so an embedded
+    # <img> never renders as broken.
+    resp = client.get("/agents/some-brand-new-agent/badge.svg")
+    assert resp.status_code == 200
+    assert "unrated" in resp.text and "#8a877d" in resp.text
