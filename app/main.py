@@ -8,6 +8,7 @@ so a stock agent can drive it with no other guidance.
 
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -79,11 +80,21 @@ app = FastAPI(
 )
 
 
-@app.middleware("http")
-async def _ready_guard(request: Request, call_next):  # type: ignore[no-untyped-def]
-    """Guarantee the schema exists before handling any request (serverless-safe)."""
-    ensure_ready()
-    return await call_next(request)
+def _db_ready() -> None:
+    """Ensure schema+seed exist before a DB-backed route runs.
+
+    Called only by routes that actually touch the database, so liveness routes
+    (``/health``, ``/skill.md``, ``/``) keep answering even if the database is
+    misconfigured. A DB failure becomes a clean 503 with the reason rather than
+    an opaque 500 from deep in the stack.
+    """
+    try:
+        ensure_ready()
+    except Exception as exc:  # noqa: BLE001 - surface the real cause to the caller
+        raise HTTPException(
+            status_code=503,
+            detail=f"database unavailable: {type(exc).__name__}: {exc}",
+        ) from exc
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
@@ -111,6 +122,35 @@ def health() -> dict[str, str]:
     return {"status": "ok", "service": "karma", "version": __version__}
 
 
+@app.get("/debug/db", include_in_schema=False)
+def debug_db() -> dict[str, object]:
+    """Temporary diagnostic: report DB backend selection and a live probe.
+
+    Names of DB-related env vars are returned (never their values) so a
+    misconfigured or missing Postgres binding is diagnosable without exposing
+    secrets. Removed once the deployment is confirmed healthy.
+    """
+    from app import db as dbmod
+
+    info: dict[str, object] = {
+        "is_postgres": dbmod.IS_POSTGRES,
+        "has_DATABASE_URL": bool(os.environ.get("DATABASE_URL")),
+        "has_POSTGRES_URL": bool(os.environ.get("POSTGRES_URL")),
+        "db_env_keys": sorted(
+            k
+            for k in os.environ
+            if any(t in k.upper() for t in ("POSTGRES", "DATABASE", "PG", "NEON", "SUPABASE"))
+        ),
+    }
+    try:
+        with dbmod.store._conn() as conn:  # noqa: SLF001 - diagnostic access
+            conn.execute("SELECT 1")
+        info["probe"] = "ok"
+    except Exception as exc:  # noqa: BLE001 - report the real reason
+        info["probe_error"] = f"{type(exc).__name__}: {exc}"
+    return info
+
+
 @app.get("/skill.md", response_class=PlainTextResponse, tags=["meta"], include_in_schema=True)
 def skill_md(request: Request) -> str:
     """Serve the SKILL.md with the live base URL substituted in.
@@ -129,6 +169,7 @@ def skill_md(request: Request) -> str:
 @app.post("/reviews", response_model=ReviewAccepted, status_code=201, tags=["reviews"])
 def create_review(review: ReviewIn) -> ReviewAccepted:
     """Store one review of ``subject_id`` by ``reviewer_id`` and return its id."""
+    _db_ready()
     review_id = store.add_review(
         reviewer_id=review.reviewer_id,
         subject_id=review.subject_id,
@@ -153,6 +194,7 @@ def create_review(review: ReviewIn) -> ReviewAccepted:
 )
 def get_reputation(agent_id: str) -> Reputation:
     """Return the reviewer-weighted trust summary for ``agent_id`` (404 if unknown)."""
+    _db_ready()
     result = compute_reputation(store, agent_id)
     if result is None:
         raise HTTPException(status_code=404, detail=f"unknown agent: {agent_id}")
@@ -170,6 +212,7 @@ def list_reviews(
     offset: int = Query(0, ge=0),
 ) -> list[ReviewOut]:
     """List reviews received by ``agent_id``, newest first, paginated."""
+    _db_ready()
     rows = store.reviews_detail(agent_id, limit, offset)
     return [ReviewOut(**row) for row in rows]
 
@@ -177,6 +220,7 @@ def list_reviews(
 @app.get("/leaderboard", response_model=Leaderboard, tags=["reputation"])
 def leaderboard(limit: int = Query(20, ge=1, le=100)) -> Leaderboard:
     """Return the most trusted agents, ranked by weighted score then confidence."""
+    _db_ready()
     entries: list[LeaderboardEntry] = []
     for subject_id in store.distinct_subjects():
         rep = compute_reputation(store, subject_id)
