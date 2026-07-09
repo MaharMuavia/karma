@@ -8,6 +8,7 @@ so a stock agent can drive it with no other guidance.
 
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -118,6 +119,30 @@ def index() -> str:
 def health() -> dict[str, str]:
     """Liveness probe. Returns ``{"status": "ok"}`` when the service is up."""
     return {"status": "ok", "service": "karma", "version": __version__}
+
+
+@app.get("/health/storage", tags=["meta"], include_in_schema=False)
+def health_storage() -> dict[str, object]:
+    """Report which storage backend is active and probe it.
+
+    Exposes only backend kind and env var *names* (never values), so it is
+    safe to leave in production; it exists so operators can confirm a
+    database integration actually took effect after a redeploy.
+    """
+    from app import db as dbmod
+
+    info: dict[str, object] = {
+        "backend": "postgres" if dbmod.IS_POSTGRES else "sqlite (ephemeral on serverless)",
+        "durable": dbmod.IS_POSTGRES,
+        "url_env_present": [n for n in dbmod._URL_ENV_CANDIDATES if os.environ.get(n)],  # noqa: SLF001
+    }
+    try:
+        with dbmod.store._conn() as conn:  # noqa: SLF001 - diagnostic access
+            conn.execute("SELECT 1")
+        info["probe"] = "ok"
+    except Exception as exc:  # noqa: BLE001 - report the reason, not a stack trace
+        info["probe"] = f"error: {type(exc).__name__}: {exc}"
+    return info
 
 
 @app.get("/skill.md", response_class=PlainTextResponse, tags=["meta"], include_in_schema=True)

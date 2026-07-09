@@ -201,3 +201,32 @@ def test_choose_is_deterministic_on_ties(client: TestClient) -> None:
     body2 = client.get("/choose?candidates=alpha,zeta").json()
     assert [v["agent_id"] for v in body1["ranking"]] == ["alpha", "zeta"]
     assert body1["ranking"] == body2["ranking"]
+
+
+def test_postgres_url_sanitizer_strips_driver_hostile_params() -> None:
+    # Hosting integrations append query params (workaround=, pgbouncer=) that
+    # libpq rejects; the sanitizer must strip them but keep sslmode.
+    from app.db import _sanitize_url
+
+    url = (
+        "postgres://user:pass@db.pooler.supabase.com:6543/postgres"
+        "?sslmode=require&workaround=supabase-pooler.vercel&pgbouncer=true"
+    )
+    cleaned = _sanitize_url(url)
+    assert "workaround" not in cleaned
+    assert "pgbouncer" not in cleaned
+    assert "sslmode=require" in cleaned
+    assert cleaned.startswith("postgres://user:pass@db.pooler.supabase.com:6543/postgres")
+
+
+def test_database_url_env_detection(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    from app.db import _database_url
+
+    for name in ("DATABASE_URL", "POSTGRES_URL", "STORAGE_URL"):
+        monkeypatch.delenv(name, raising=False)
+    assert _database_url() is None
+    monkeypatch.setenv("STORAGE_URL", "postgresql://u:p@host/db?sslmode=require")
+    assert _database_url() == "postgresql://u:p@host/db?sslmode=require"
+    # Non-postgres values (e.g. a blob-store URL) must be ignored.
+    monkeypatch.setenv("STORAGE_URL", "https://not-a-database.example.com")
+    assert _database_url() is None

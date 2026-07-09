@@ -16,8 +16,51 @@ import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-DATABASE_URL = os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL")
+# Query parameters libpq/psycopg understands; anything else (e.g. the
+# ``workaround=...`` or ``pgbouncer=...`` markers that hosting integrations
+# append for their own tooling) would make the connection fail, so strip it.
+_SAFE_URL_PARAMS = {
+    "sslmode",
+    "options",
+    "application_name",
+    "connect_timeout",
+    "channel_binding",
+    "sslrootcert",
+    "target_session_attrs",
+}
+
+# Env var names that hosting integrations use for the Postgres URL. Vercel
+# marketplace integrations (Neon, Supabase, ...) use a configurable prefix,
+# so accept the common spellings rather than demanding one exact name.
+_URL_ENV_CANDIDATES = (
+    "DATABASE_URL",
+    "POSTGRES_URL",
+    "STORAGE_URL",
+    "STORAGE_POSTGRES_URL",
+    "SUPABASE_DB_URL",
+    "DATABASE_POSTGRES_URL",
+)
+
+
+def _sanitize_url(url: str) -> str:
+    """Drop URL query parameters that the psycopg/libpq driver would reject."""
+    parts = urlsplit(url)
+    query = urlencode([(k, v) for k, v in parse_qsl(parts.query) if k in _SAFE_URL_PARAMS])
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, query, parts.fragment))
+
+
+def _database_url() -> str | None:
+    """Return the first configured Postgres URL, sanitized, or None."""
+    for name in _URL_ENV_CANDIDATES:
+        value = os.environ.get(name, "").strip()
+        if value.startswith(("postgres://", "postgresql://")):
+            return _sanitize_url(value)
+    return None
+
+
+DATABASE_URL = _database_url()
 IS_POSTGRES = bool(DATABASE_URL)
 
 # SQLite path (ignored when Postgres is configured). Overridable for tests.
