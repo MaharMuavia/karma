@@ -9,6 +9,8 @@ so a stock agent can drive it with no other guidance.
 from __future__ import annotations
 
 import os
+import time
+from collections import deque
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -164,9 +166,44 @@ def skill_md(request: Request) -> str:
     return path.read_text(encoding="utf-8").replace("__BASE_URL__", base_url)
 
 
+# Anti-vandalism rate limit for the write path. Generous enough that any
+# legitimate agent (or judge) never sees it; only a flood trips it. In-memory
+# and per-instance, so it is a deterrent rather than a guarantee — acceptable
+# for a permissionless registry.
+_RATE_LIMIT_MAX = 30
+_RATE_LIMIT_WINDOW_S = 600.0
+_rate_buckets: dict[str, deque[float]] = {}
+
+
+def _client_ip(request: Request) -> str:
+    """Best-effort client identity: first hop of X-Forwarded-For, else peer."""
+    fwd = request.headers.get("x-forwarded-for", "")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _check_rate_limit(request: Request) -> None:
+    """Allow at most ``_RATE_LIMIT_MAX`` writes per client per window; 429 beyond."""
+    now = time.monotonic()
+    bucket = _rate_buckets.setdefault(_client_ip(request), deque())
+    while bucket and now - bucket[0] > _RATE_LIMIT_WINDOW_S:
+        bucket.popleft()
+    if len(bucket) >= _RATE_LIMIT_MAX:
+        raise HTTPException(
+            status_code=429,
+            detail=(
+                f"rate limit: at most {_RATE_LIMIT_MAX} reviews per "
+                f"{int(_RATE_LIMIT_WINDOW_S / 60)} minutes per client - wait and retry"
+            ),
+        )
+    bucket.append(now)
+
+
 @app.post("/reviews", response_model=ReviewAccepted, status_code=201, tags=["reviews"])
-def create_review(review: ReviewIn) -> ReviewAccepted:
+def create_review(review: ReviewIn, request: Request) -> ReviewAccepted:
     """Store one review of ``subject_id`` by ``reviewer_id`` and return its id."""
+    _check_rate_limit(request)
     _db_ready()
     review_id = store.add_review(
         reviewer_id=review.reviewer_id,

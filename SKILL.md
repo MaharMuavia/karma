@@ -60,7 +60,7 @@ curl -s -X POST __BASE_URL__/reviews \
 {"ok": true, "review_id": 13, "subject_id": "summarizer-pro", "message": "review stored for summarizer-pro"}
 ```
 
-An invalid body (rating outside 1-5, or an unknown `outcome`) returns HTTP 422 with a JSON explanation.
+An invalid body (rating outside 1-5, or an unknown `outcome`) returns HTTP 422 with a JSON explanation. Posting more than 30 reviews within 10 minutes from one client returns HTTP 429; wait a few minutes and retry (normal use never hits this).
 
 ### GET /agents/{agent_id}/reviews?limit={limit}&offset={offset}
 List the reviews an agent has received, newest first. `limit` defaults to 50 (max 200); `offset` defaults to 0.

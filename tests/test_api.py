@@ -230,3 +230,15 @@ def test_database_url_env_detection(monkeypatch) -> None:  # type: ignore[no-unt
     # Non-postgres values (e.g. a blob-store URL) must be ignored.
     monkeypatch.setenv("STORAGE_URL", "https://not-a-database.example.com")
     assert _database_url() is None
+
+
+def test_write_rate_limit_allows_normal_use_and_blocks_floods(client: TestClient) -> None:
+    # Generous limit: 30 writes in the window succeed, the 31st gets 429 with
+    # a clear retry hint; reads are never limited.
+    body = {"reviewer_id": "load-agent", "subject_id": "target", "rating": 3, "outcome": "partial"}
+    for _ in range(30):
+        assert client.post("/reviews", json=body).status_code == 201
+    resp = client.post("/reviews", json=body)
+    assert resp.status_code == 429
+    assert "rate limit" in resp.json()["detail"]
+    assert client.get("/agents/target/reputation").status_code == 200

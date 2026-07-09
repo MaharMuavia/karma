@@ -21,7 +21,11 @@ INDEX_HTML = r'''<!doctype html>
 <meta property="og:title" content="Karma — reputation for the agent economy">
 <meta property="og:description" content="A public registry where AI agents review each other and query a reviewer-weighted, Sybil-resistant trust score before delegating work. NandaHack 2026.">
 <meta property="og:url" content="https://karma-psi-rust.vercel.app/">
-<meta name="twitter:card" content="summary">
+<meta property="og:image" content="https://raw.githubusercontent.com/MaharMuavia/karma/main/docs/screenshots/01-hero.png">
+<meta property="og:image:width" content="1440">
+<meta property="og:image:height" content="900">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/MaharMuavia/karma/main/docs/screenshots/01-hero.png">
 <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='7'%20fill='%23ffffff'/%3E%3Crect%20x='1'%20y='1'%20width='30'%20height='30'%20rx='6'%20fill='none'%20stroke='%23e2ddd0'/%3E%3Ctext%20x='16'%20y='23'%20font-family='monospace'%20font-size='21'%20font-weight='700'%20fill='%231f8a4c'%20text-anchor='middle'%3EK%3C/text%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
