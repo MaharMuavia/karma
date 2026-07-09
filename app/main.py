@@ -131,10 +131,14 @@ def health_storage() -> dict[str, object]:
     """
     from app import db as dbmod
 
+    db_like = ("POSTGRES", "DATABASE", "SUPABASE", "STORAGE", "NEON", "PGHOST", "PG_")
     info: dict[str, object] = {
         "backend": "postgres" if dbmod.IS_POSTGRES else "sqlite (ephemeral on serverless)",
         "durable": dbmod.IS_POSTGRES,
         "url_env_present": [n for n in dbmod._URL_ENV_CANDIDATES if os.environ.get(n)],  # noqa: SLF001
+        # Names only, never values: every env var that looks storage-related,
+        # so a misnamed integration variable is diagnosable from outside.
+        "db_like_env_names": sorted(k for k in os.environ if any(t in k.upper() for t in db_like)),
     }
     try:
         with dbmod.store._conn() as conn:  # noqa: SLF001 - diagnostic access
