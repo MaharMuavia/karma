@@ -63,8 +63,17 @@ def ensure_ready() -> None:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    """Ensure the store is ready before a long-lived host accepts traffic."""
-    ensure_ready()
+    """Best-effort warm-up before a long-lived host accepts traffic.
+
+    Never raises: a database problem here must not crash the serverless
+    function at startup (which would surface as an opaque
+    ``FUNCTION_INVOCATION_FAILED`` on every route). DB-backed routes retry via
+    ``_db_ready`` and return a clean 503 with the reason instead.
+    """
+    try:
+        ensure_ready()
+    except Exception:  # noqa: BLE001 - startup DB hiccup is retried per-request
+        pass
     yield
 
 

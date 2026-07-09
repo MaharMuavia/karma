@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import tempfile
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
@@ -20,7 +21,13 @@ DATABASE_URL = os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL")
 IS_POSTGRES = bool(DATABASE_URL)
 
 # SQLite path (ignored when Postgres is configured). Overridable for tests.
-SQLITE_PATH = os.environ.get("KARMA_DB_PATH", "karma.db")
+# Defaults to the OS temp dir so it works on serverless hosts whose app
+# directory is read-only (e.g. Vercel exposes only ``/tmp`` as writable). This
+# makes the service run with zero external setup; attach Postgres for durable
+# storage across cold starts.
+SQLITE_PATH = os.environ.get("KARMA_DB_PATH") or os.path.join(
+    tempfile.gettempdir(), "karma.db"
+)
 
 # Timestamp expression that yields an identical "YYYY-MM-DDTHH:MM:SSZ" string
 # in both dialects, so API responses look the same regardless of backend.
