@@ -160,3 +160,44 @@ def test_dashboard_served_at_root(client: TestClient) -> None:
     body = resp.text
     assert "KARMA" in body
     assert "/agents/" in body  # the page calls the reputation API
+
+
+def test_choose_picks_highest_rated_and_excludes_avoid(client: TestClient) -> None:
+    # Seed data: summarizer-pro is trusted, flaky-translator is "avoid".
+    resp = client.get("/choose?candidates=summarizer-pro,flaky-translator,cheap-scraper")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["chosen"] == "summarizer-pro"
+    assert "summarizer-pro" in body["reasoning"]
+    assert "flaky-translator" in body["reasoning"]  # named as excluded
+    ranked_ids = [v["agent_id"] for v in body["ranking"]]
+    assert ranked_ids[0] == "summarizer-pro"
+    assert len(ranked_ids) == 3
+
+
+def test_choose_all_unknown_returns_null_choice(client: TestClient) -> None:
+    body = client.get("/choose?candidates=ghost-a,ghost-b").json()
+    assert body["chosen"] is None
+    assert "references" in body["reasoning"]
+    assert all(v["known"] is False for v in body["ranking"])
+
+
+def test_choose_all_avoid_returns_null_choice(client: TestClient) -> None:
+    body = client.get("/choose?candidates=flaky-translator").json()
+    assert body["chosen"] is None
+    assert "poor track record" in body["reasoning"]
+
+
+def test_choose_validates_input(client: TestClient) -> None:
+    assert client.get("/choose?candidates=,%20,").status_code == 422
+    assert client.get("/choose").status_code == 422
+    too_many = ",".join(f"a{i}" for i in range(51))
+    assert client.get(f"/choose?candidates={too_many}").status_code == 422
+
+
+def test_choose_is_deterministic_on_ties(client: TestClient) -> None:
+    # Two unknown-but-equal candidates: ranking must tie-break on agent id.
+    body1 = client.get("/choose?candidates=zeta,alpha").json()
+    body2 = client.get("/choose?candidates=alpha,zeta").json()
+    assert [v["agent_id"] for v in body1["ranking"]] == ["alpha", "zeta"]
+    assert body1["ranking"] == body2["ranking"]

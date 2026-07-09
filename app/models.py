@@ -86,3 +86,26 @@ class Leaderboard(BaseModel):
 
     count: int
     agents: list[LeaderboardEntry]
+
+
+class CandidateVerdict(BaseModel):
+    """One candidate's standing inside a /choose decision."""
+
+    agent_id: str
+    known: bool
+    score: float
+    confidence: float
+    review_count: int
+    recommendation: str
+
+
+class Choice(BaseModel):
+    """A delegation decision over a set of candidate agents."""
+
+    chosen: str | None = Field(
+        ..., description="The candidate to delegate to, or null if every candidate should be avoided."
+    )
+    reasoning: str = Field(..., description="One plain-language sentence explaining the decision.")
+    ranking: list[CandidateVerdict] = Field(
+        ..., description="All candidates, best first, with the numbers behind the decision."
+    )

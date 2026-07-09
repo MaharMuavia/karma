@@ -18,6 +18,8 @@ from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from app import __version__
 from app.db import store
 from app.models import (
+    CandidateVerdict,
+    Choice,
     Leaderboard,
     LeaderboardEntry,
     Reputation,
@@ -182,6 +184,84 @@ def list_reviews(
     _db_ready()
     rows = store.reviews_detail(agent_id, limit, offset)
     return [ReviewOut(**row) for row in rows]
+
+
+@app.get("/choose", response_model=Choice, tags=["reputation"])
+def choose(
+    candidates: str = Query(
+        ...,
+        min_length=1,
+        description="Comma-separated candidate agent ids, e.g. candidates=a,b,c",
+    ),
+) -> Choice:
+    """Decide which of several candidate agents to delegate a task to.
+
+    Decision policy (deterministic):
+
+    1. Candidates whose recommendation starts with ``avoid:`` are excluded.
+    2. Among the rest, the highest weighted score wins; ties break on
+       confidence, then review count, then agent id.
+    3. If no remaining candidate has any reviews, ``chosen`` is null — the
+       caller should gather references instead of delegating blind.
+
+    The full ranking with per-candidate numbers is returned so the caller can
+    apply its own policy instead if it prefers.
+    """
+    _db_ready()
+    ids = list(dict.fromkeys(c.strip() for c in candidates.split(",") if c.strip()))
+    if not ids:
+        raise HTTPException(status_code=422, detail="candidates must contain at least one agent id")
+    if len(ids) > 50:
+        raise HTTPException(status_code=422, detail="at most 50 candidates per call")
+
+    verdicts: list[CandidateVerdict] = []
+    for agent_id in ids:
+        rep = compute_reputation(store, agent_id)
+        if rep is None:
+            verdicts.append(
+                CandidateVerdict(
+                    agent_id=agent_id,
+                    known=False,
+                    score=0.0,
+                    confidence=0.0,
+                    review_count=0,
+                    recommendation="unknown: no reviews yet - proceed with caution or request references",
+                )
+            )
+        else:
+            verdicts.append(
+                CandidateVerdict(
+                    agent_id=agent_id,
+                    known=True,
+                    score=float(rep["score"]),  # type: ignore[arg-type]
+                    confidence=float(rep["confidence"]),  # type: ignore[arg-type]
+                    review_count=int(rep["review_count"]),  # type: ignore[arg-type]
+                    recommendation=str(rep["recommendation"]),
+                )
+            )
+
+    verdicts.sort(key=lambda v: (-v.score, -v.confidence, -v.review_count, v.agent_id))
+
+    avoided = [v for v in verdicts if v.recommendation.startswith("avoid:")]
+    eligible = [v for v in verdicts if not v.recommendation.startswith("avoid:")]
+    rated = [v for v in eligible if v.review_count > 0]
+
+    if rated:
+        best = rated[0]
+        reason = (
+            f"{best.agent_id} has the strongest weighted reputation "
+            f"({best.score:.2f}/5, {best.confidence:.0%} confidence, "
+            f"{best.review_count} review{'s' if best.review_count != 1 else ''})"
+        )
+        if avoided:
+            reason += "; excluded " + ", ".join(f"{v.agent_id} ({v.recommendation.split(':')[0]})" for v in avoided)
+        return Choice(chosen=best.agent_id, reasoning=reason + ".", ranking=verdicts)
+
+    if eligible:
+        reason = "no candidate has any reviews yet - gather references before delegating"
+    else:
+        reason = "every candidate has a poor track record - do not delegate this task"
+    return Choice(chosen=None, reasoning=reason + ".", ranking=verdicts)
 
 
 @app.get("/leaderboard", response_model=Leaderboard, tags=["reputation"])

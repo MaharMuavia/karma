@@ -1,0 +1,24 @@
+name: Uptime
+
+# Keeps the free-tier deployment warm and verifies the public endpoints stay
+# healthy — especially through the NandaHack judging window. A failed run means
+# the live service is down or misbehaving; check the Vercel dashboard.
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe live endpoints
+        run: |
+          BASE="https://karma-psi-rust.vercel.app"
+          set -x
+          curl -sf --retry 3 --retry-delay 20 --max-time 70 "$BASE/health" | grep '"ok"'
+          curl -sf --max-time 30 "$BASE/agents/summarizer-pro/reputation" | grep '"score"'
+          curl -sf --max-time 30 "$BASE/leaderboard?limit=3" | grep '"agents"'
+          curl -sf --max-time 30 "$BASE/choose?candidates=summarizer-pro,flaky-translator" | grep '"chosen"'
+          curl -sf --max-time 30 "$BASE/skill.md" | head -1 | grep '# Karma'
