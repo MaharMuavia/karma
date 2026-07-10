@@ -94,6 +94,7 @@ CREATE TABLE IF NOT EXISTS reviews (
     outcome      TEXT NOT NULL CHECK (outcome IN ('succeeded','failed','partial')),
     task_summary TEXT NOT NULL DEFAULT '',
     evidence_url TEXT,
+    evidence     TEXT,
     created_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
 );
 CREATE INDEX IF NOT EXISTS idx_reviews_subject  ON reviews(subject_id);
@@ -114,6 +115,7 @@ CREATE TABLE IF NOT EXISTS reviews (
     outcome      TEXT NOT NULL CHECK (outcome IN ('succeeded','failed','partial')),
     task_summary TEXT NOT NULL DEFAULT '',
     evidence_url TEXT,
+    evidence     TEXT,
     created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_reviews_subject  ON reviews(subject_id);
@@ -157,7 +159,7 @@ class Store:
     # -- schema ---------------------------------------------------------
 
     def init_schema(self) -> None:
-        """Create tables and indexes if absent."""
+        """Create tables and indexes if absent, and apply additive migrations."""
         with self._conn() as conn:
             if IS_POSTGRES:
                 # psycopg3 sends one statement per execute(), so run each DDL
@@ -165,8 +167,14 @@ class Store:
                 for statement in _POSTGRES_SCHEMA.split(";"):
                     if statement.strip():
                         conn.execute(statement)
+                conn.execute("ALTER TABLE reviews ADD COLUMN IF NOT EXISTS evidence TEXT")
             else:
                 conn.executescript(_SQLITE_SCHEMA)
+                has_evidence = conn.execute(
+                    "SELECT COUNT(*) AS n FROM pragma_table_info('reviews') WHERE name='evidence'"
+                ).fetchone()["n"]
+                if not has_evidence:
+                    conn.execute("ALTER TABLE reviews ADD COLUMN evidence TEXT")
 
     def count_reviews(self) -> int:
         """Total number of stored reviews (used to decide whether to seed)."""
@@ -195,6 +203,7 @@ class Store:
         evidence_url: str | None,
         reviewer_display_name: str | None,
         subject_display_name: str | None,
+        evidence: str | None = None,
     ) -> int:
         """Insert a review (creating both agents if new) and return its id."""
         p = self.ph
@@ -203,10 +212,10 @@ class Store:
             self.upsert_agent(conn, subject_id, subject_display_name)
             insert = (
                 f"INSERT INTO reviews "
-                f"(reviewer_id, subject_id, rating, outcome, task_summary, evidence_url) "
-                f"VALUES ({p}, {p}, {p}, {p}, {p}, {p})"
+                f"(reviewer_id, subject_id, rating, outcome, task_summary, evidence_url, evidence) "
+                f"VALUES ({p}, {p}, {p}, {p}, {p}, {p}, {p})"
             )
-            params = (reviewer_id, subject_id, rating, outcome, task_summary, evidence_url)
+            params = (reviewer_id, subject_id, rating, outcome, task_summary, evidence_url, evidence)
             if IS_POSTGRES:
                 row = conn.execute(insert + " RETURNING id", params).fetchone()
                 return int(row["id"])
@@ -251,11 +260,22 @@ class Store:
         with self._conn() as conn:
             rows = conn.execute(
                 f"SELECT id, reviewer_id, subject_id, rating, outcome, task_summary, "
-                f"evidence_url, {_TS_SELECT} AS created_at FROM reviews "
+                f"evidence_url, evidence, {_TS_SELECT} AS created_at FROM reviews "
                 f"WHERE subject_id = {p} ORDER BY id DESC LIMIT {p} OFFSET {p}",
                 (subject_id, limit, offset),
             ).fetchall()
             return [dict(r) for r in rows]
+
+    def get_review(self, review_id: int) -> dict[str, Any] | None:
+        """Return one full review row (including its evidence receipt) or None."""
+        with self._conn() as conn:
+            row = conn.execute(
+                f"SELECT id, reviewer_id, subject_id, rating, outcome, task_summary, "
+                f"evidence_url, evidence, {_TS_SELECT} AS created_at FROM reviews "
+                f"WHERE id = {self.ph}",
+                (review_id,),
+            ).fetchone()
+            return dict(row) if row is not None else None
 
     def distinct_subjects(self) -> list[str]:
         """Return every agent id that has received at least one review."""

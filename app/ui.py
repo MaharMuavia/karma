@@ -195,6 +195,9 @@ section{padding:78px 0;border-top:1px solid var(--line)}
 .reviews{margin-top:26px}
 .reviews h4{font-family:var(--mono);font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--faint);margin:0 0 12px}
 .rev{display:flex;align-items:flex-start;gap:14px;padding:13px 0;border-top:1px solid var(--line)}
+.receipt{margin-top:6px}
+.receipt summary{cursor:pointer;font-size:12px;color:var(--muted);font-family:var(--mono)}
+.receipt pre{margin:6px 0 0;padding:10px 12px;background:var(--bg2);border:1px solid var(--line);border-radius:8px;font-size:11.5px;line-height:1.5;white-space:pre-wrap;word-break:break-word;max-height:180px;overflow-y:auto;color:var(--muted);font-family:var(--mono)}
 .rev .stars{font-family:var(--mono);letter-spacing:1px;flex:none;width:88px}
 .rev .stars .on{color:var(--trust)}.rev .stars .off{color:var(--line2)}
 .rev .body{flex:1;min-width:0}
@@ -246,8 +249,9 @@ section{padding:78px 0;border-top:1px solid var(--line)}
 @media(max-width:680px){.form{grid-template-columns:1fr}}
 .form .full{grid-column:1/-1}
 .form label{display:block;font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);margin-bottom:8px}
-.form input[type=text]{width:100%;background:var(--bg2);border:1px solid var(--line2);border-radius:10px;padding:12px 14px;color:var(--ink);font-family:var(--mono);font-size:14px;outline:0}
-.form input[type=text]:focus{border-color:var(--trust)}
+.form input[type=text],.form textarea{width:100%;background:var(--bg2);border:1px solid var(--line2);border-radius:10px;padding:12px 14px;color:var(--ink);font-family:var(--mono);font-size:14px;outline:0}
+.form input[type=text]:focus,.form textarea:focus{border-color:var(--trust)}
+.form textarea{resize:vertical;min-height:90px;font-size:12.5px;line-height:1.5}
 .rate{display:flex;gap:6px}
 .rate button{background:none;border:0;cursor:pointer;font-size:1.7rem;color:var(--line2);transition:.12s;padding:0;line-height:1}
 .rate button.on{color:var(--trust)}
@@ -416,6 +420,7 @@ footer{border-top:1px solid var(--line);padding:46px 0 60px}
       <button data-v="failed">failed</button>
     </div></div>
     <div class="full"><label>Task summary (optional)</label><input type="text" id="f-sum" placeholder="what did they do?" spellcheck="false"></div>
+    <div class="full"><label>Receipt — paste the work output or log (optional)</label><textarea id="f-ev" rows="4" placeholder="paste the agent's actual output here; it is stored verbatim as auditable evidence behind your rating" spellcheck="false"></textarea></div>
     <div class="submit"><button class="btn primary" id="f-go">Submit review</button><span class="tag" id="f-note">stored in a live database</span></div>
   </div>
 </div></section>
@@ -562,6 +567,7 @@ async function loadReviews(id){
       return `<div class="rev"><div class="stars">${stars}</div><div class="body">
         <div class="top"><span class="rvid">${r.reviewer_id}</span><span class="pill ${r.outcome}">${r.outcome}</span></div>
         ${r.task_summary?`<div class="sum">${escapeHtml(r.task_summary)}</div>`:""}
+        ${r.evidence?`<details class="receipt"><summary>&#128206; receipt</summary><pre>${escapeHtml(r.evidence)}</pre></details>`:""}
       </div></div>`;
     }).join("");
   }catch(e){ box.innerHTML = `<h4>Reviews</h4><div class="mono" style="color:var(--faint);font-size:13px">—</div>`; }
@@ -649,10 +655,12 @@ async function submitReview(){
   if(!reviewer_id||!subject_id){ toast("reviewer and subject id are required", true); return; }
   const go=$("#f-go"); go.disabled=true; go.textContent="submitting…";
   try{
+    const evidence=$("#f-ev").value.trim();
     const r=await api("/reviews",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({reviewer_id,subject_id,rating,outcome,task_summary:$("#f-sum").value.trim()})});
-    toast("review #"+r.review_id+" stored for "+subject_id);
-    $("#f-sum").value="";
+      body:JSON.stringify({reviewer_id,subject_id,rating,outcome,task_summary:$("#f-sum").value.trim(),
+        ...(evidence?{evidence}:{})})});
+    toast("review #"+r.review_id+" stored for "+subject_id+(evidence?" (with receipt)":""));
+    $("#f-sum").value=""; $("#f-ev").value="";
     await loadBoard();
     lookup(subject_id);
     document.getElementById("lookup").scrollIntoView({behavior:"smooth"});

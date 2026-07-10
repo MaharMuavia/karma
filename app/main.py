@@ -214,12 +214,27 @@ def create_review(review: ReviewIn, request: Request) -> ReviewAccepted:
         evidence_url=review.evidence_url,
         reviewer_display_name=review.reviewer_display_name,
         subject_display_name=review.subject_display_name,
+        evidence=review.evidence,
     )
     return ReviewAccepted(
         review_id=review_id,
         subject_id=review.subject_id,
         message=f"review stored for {review.subject_id}",
     )
+
+
+@app.get("/reviews/{review_id}", response_model=ReviewOut, tags=["reviews"])
+def get_review(review_id: int) -> ReviewOut:
+    """Return one review in full, including its evidence receipt (404 if unknown).
+
+    This is the audit path: a reputation score is only as good as the reviews
+    behind it, and a review is only as good as its receipt.
+    """
+    _db_ready()
+    row = store.get_review(review_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"unknown review id: {review_id}")
+    return ReviewOut(**row)  # type: ignore[arg-type]
 
 
 @app.get(

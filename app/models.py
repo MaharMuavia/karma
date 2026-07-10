@@ -28,6 +28,14 @@ class ReviewIn(BaseModel):
     evidence_url: str | None = Field(
         None, max_length=500, description="Optional URL to a trace, transcript, or receipt."
     )
+    evidence: str | None = Field(
+        None,
+        max_length=10000,
+        description=(
+            "Optional receipt: the actual work output or log excerpt behind this rating, "
+            "stored verbatim so anyone can audit the review later."
+        ),
+    )
     reviewer_display_name: str | None = Field(
         None, max_length=200, description="Optional human-readable name for the reviewer."
     )
@@ -46,6 +54,7 @@ class ReviewOut(BaseModel):
     outcome: Outcome
     task_summary: str
     evidence_url: str | None
+    evidence: str | None = None
     created_at: str
 
 

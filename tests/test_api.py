@@ -259,3 +259,30 @@ def test_badge_svg_never_breaks_embeds(client: TestClient) -> None:
     resp = client.get("/agents/some-brand-new-agent/badge.svg")
     assert resp.status_code == 200
     assert "unrated" in resp.text and "#8a877d" in resp.text
+
+
+def test_evidence_receipt_roundtrip(client: TestClient) -> None:
+    # A review can carry a verbatim evidence receipt, retrievable in the list
+    # and via the single-review audit endpoint.
+    receipt = "Input: 38-page PDF\nOutput: 412-word abstract; 2 spot-checks passed."
+    resp = client.post("/reviews", json={
+        "reviewer_id": "auditor", "subject_id": "summarizer-pro",
+        "rating": 5, "outcome": "succeeded",
+        "task_summary": "audited summary", "evidence": receipt,
+    })
+    assert resp.status_code == 201
+    rid = resp.json()["review_id"]
+    single = client.get(f"/reviews/{rid}")
+    assert single.status_code == 200
+    assert single.json()["evidence"] == receipt
+    listed = client.get("/agents/summarizer-pro/reviews?limit=1").json()
+    assert listed[0]["evidence"] == receipt
+
+
+def test_review_audit_404_and_evidence_size_cap(client: TestClient) -> None:
+    assert client.get("/reviews/999999").status_code == 404
+    too_big = client.post("/reviews", json={
+        "reviewer_id": "a", "subject_id": "b", "rating": 3,
+        "outcome": "partial", "evidence": "x" * 10001,
+    })
+    assert too_big.status_code == 422
