@@ -41,7 +41,7 @@ def step(n: int, title: str) -> None:
 
 
 print("=" * 62)
-print(" A STOCK AGENT USING KARMA — no help beyond the SKILL.md")
+print(" A STOCK AGENT USING KARMA - no help beyond the SKILL.md")
 print("=" * 62)
 
 step(1, f"Read the skill: GET {BASE}/skill.md")
